@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capture the enemy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Press Start 2P', cursive;
+            background-color: #1a202c; /* Tailwind gray-900 */
+            color: #e2e8f0; /* Tailwind gray-300 */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 1rem;
+            overscroll-behavior: none; /* Prevents pull-to-refresh on mobile */
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem; /* Space between elements */
+        }
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(10, minmax(0, 1fr)); /* 10 columns */
+            border: 2px solid #4a5568; /* Tailwind gray-600 */
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.5); /* Cyan glow */
+            touch-action: none; /* Disable browser touch actions like pinch-zoom on the grid */
+        }
+        .grid-cell {
+            width: clamp(30px, 8vw, 50px); /* Responsive cell size */
+            height: clamp(30px, 8vw, 50px);
+            border: 1px solid #2d3748; /* Tailwind gray-700 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(12px, 3vw, 20px); /* Responsive font size */
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            position: relative; /* For tooltips */
+        }
+        .grid-cell.player1-unit { color: #f56565; /* Tailwind red-500 */ }
+        .grid-cell.player2-unit { color: #63b3ed; /* Tailwind blue-400 */ }
+        .grid-cell.player1-base { background-color: rgba(245, 101, 101, 0.3); color: #f56565; }
+        .grid-cell.player2-base { background-color: rgba(99, 179, 237, 0.3); color: #63b3ed; }
+
+        .grid-cell.selected {
+            background-color: #f6e05e !important; /* Tailwind yellow-300 */
+            outline: 2px solid #f6e05e;
+            color: #1a202c !important; /* Dark text on selection */
+        }
+        .grid-cell.possible-move {
+            background-color: rgba(76, 175, 80, 0.3); /* Greenish with transparency */
+        }
+        .grid-cell.possible-attack {
+            background-color: rgba(255, 82, 82, 0.4); /* Reddish with transparency */
+        }
+        .grid-cell.highlight-attackable {
+            outline: 2px dashed #ef4444; /* red-500 */
+        }
+
+        .unit-tooltip {
+            position: absolute;
+            bottom: 105%; /* Position above the cell */
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #2d3748; /* gray-700 */
+            color: #e2e8f0; /* gray-300 */
+            padding: 0.3rem 0.6rem;
+            border-radius: 0.25rem; /* rounded-md */
+            font-size: 0.75rem; /* text-xs */
+            white-space: nowrap;
+            z-index: 10;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.2s, visibility 0.2s;
+        }
+        .grid-cell:hover .unit-tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .game-button {
+            background-color: #4a5568; /* gray-600 */
+            color: #e2e8f0; /* gray-300 */
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 0.5rem; /* rounded-lg */
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .game-button:hover {
+            background-color: #718096; /* gray-500 */
+        }
+        .game-button:active {
+            transform: translateY(1px);
+            background-color: #2d3748; /* gray-700 */
+        }
+        .game-button:disabled {
+            background-color: #2d3748; /* gray-700 */
+            color: #718096; /* gray-500 */
+            cursor: not-allowed;
+        }
+        .message-box {
+            min-height: 3em; /* Ensure it has some height for messages */
+            width: 100%;
+            max-width: 500px; /* Max width for message box */
+            padding: 0.75rem;
+            background-color: #2d3748; /* gray-700 */
+            border: 1px solid #4a5568; /* gray-600 */
+            border-radius: 0.5rem; /* rounded-lg */
+            text-align: center;
+            font-size: 0.9rem;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);
+        }
+        .turn-indicator {
+            font-size: 1.25rem; /* text-xl */
+            font-weight: bold;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem; /* rounded-md */
+        }
+        .player1-turn { background-color: #c53030; color: white; /* red-700 */ }
+        .player2-turn { background-color: #2b6cb0; color: white; /* blue-700 */ }
+
+        /* Modal styles */
+        .modal {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000; /* Ensure it's on top */
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        .modal.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        .modal-content {
+            background-color: #2d3748; /* gray-800 */
+            padding: 2rem;
+            border-radius: 0.75rem; /* rounded-xl */
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            border: 1px solid #4a5568; /* gray-600 */
+        }
+        .modal-content h2 {
+            font-size: 1.75rem; /* text-2xl */
+            margin-bottom: 1rem;
+        }
+        .modal-content p {
+            margin-bottom: 1.5rem;
+            font-size: 1rem;
+        }
+
+        /* Simple animation for units appearing/dying */
+        @keyframes spawn {
+            from { transform: scale(0.5); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .unit-spawn {
+            animation: spawn 0.3s ease-out;
+        }
+        @keyframes death {
+            from { transform: scale(1); opacity: 1; }
+            to { transform: scale(0.5); opacity: 0; filter: blur(2px); }
+        }
+        .unit-death {
+            animation: death 0.4s ease-in forwards;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1 class="text-3xl font-bold mb-2 text-cyan-400 tracking-wider">Capture the enemy</h1>
+
+        <div id="turnIndicator" class="turn-indicator mb-2">Player 1's Turn (Red)</div>
+        <div id="messageBox" class="message-box mb-2">Welcome! Red player, select a unit.</div>
+
+        <div id="gameBoard" class="grid-container">
+            </div>
+
+        <div class="mt-4 flex space-x-4">
+            <button id="endTurnButton" class="game-button">End Turn</button>
+            <button id="resetButton" class="game-button bg-yellow-600 hover:bg-yellow-700">Reset Game</button>
+        </div>
+
+        <div class="mt-3 text-xs text-gray-500">
+            Units: [G]runt (H3, A1, M2), [T]ank (H5, A3, M1), [S]cout (H2, A1, M3) | [B]ase (H10)
+        </div>
+    </div>
+
+    <div id="gameOverModal" class="modal">
+        <div class="modal-content">
+            <h2 id="gameOverTitle">Game Over!</h2>
+            <p id="gameOverMessage">Player X has won!</p>
+            <button id="playAgainButton" class="game-button bg-green-600 hover:bg-green-700">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Game Configuration ---
+        const GRID_SIZE = 10;
+        const PLAYER1 = { id: 1, name: "Red", color: "#f56565", unitClass: "player1-unit", baseClass: "player1-base", turnClass: "player1-turn" };
+        const PLAYER2 = { id: 2, name: "Blue", color: "#63b3ed", unitClass: "player2-unit", baseClass: "player2-base", turnClass: "player2-turn" };
+
+        const UNIT_TYPES = {
+            BASE: { id: 'B', health: 10, attack: 0, move: 0, range: 0, cost: 0, isBase: true },
+            GRUNT: { id: 'G', health: 3, attack: 1, move: 2, range: 1, cost: 50 },
+            TANK: { id: 'T', health: 5, attack: 3, move: 1, range: 1, cost: 100 },
+            SCOUT: { id: 'S', health: 2, attack: 1, move: 3, range: 1, cost: 30 }, // Range 1 for attack, vision could be different
+        };
+
+        // --- Game State ---
+        let board = []; // 2D array for game state
+        let currentPlayer = PLAYER1;
+        let selectedUnit = null; // { x, y, unit }
+        let unitMovedThisTurn = false;
+        let unitAttackedThisTurn = false;
+        let gameActive = true;
+
+        // --- DOM Elements ---
+        const gameBoardElement = document.getElementById('gameBoard');
+        const turnIndicatorElement = document.getElementById('turnIndicator');
+        const messageBoxElement = document.getElementById('messageBox');
+        const endTurnButton = document.getElementById('endTurnButton');
+        const resetButton = document.getElementById('resetButton');
+        const gameOverModal = document.getElementById('gameOverModal');
+        const gameOverTitle = document.getElementById('gameOverTitle');
+        const gameOverMessage = document.getElementById('gameOverMessage');
+        const playAgainButton = document.getElementById('playAgainButton');
+
+        // --- Game Logic Functions ---
+
+        /**
+         * Initializes the game board and places starting units.
+         */
+        function initializeBoard() {
+            board = [];
+            for (let r = 0; r < GRID_SIZE; r++) {
+                const row = [];
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    row.push(null); // null means empty cell
+                }
+                board.push(row);
+            }
+
+            // Place bases
+            placeUnit(0, Math.floor(GRID_SIZE / 2) -1 , { ...UNIT_TYPES.BASE, playerId: PLAYER1.id, currentHealth: UNIT_TYPES.BASE.health });
+            placeUnit(GRID_SIZE - 1, Math.floor(GRID_SIZE / 2) , { ...UNIT_TYPES.BASE, playerId: PLAYER2.id, currentHealth: UNIT_TYPES.BASE.health });
+
+            // Place starting units for Player 1 (Red)
+            placeUnit(1, Math.floor(GRID_SIZE / 2) - 2, { ...UNIT_TYPES.GRUNT, playerId: PLAYER1.id, currentHealth: UNIT_TYPES.GRUNT.health });
+            placeUnit(1, Math.floor(GRID_SIZE / 2) +1, { ...UNIT_TYPES.SCOUT, playerId: PLAYER1.id, currentHealth: UNIT_TYPES.SCOUT.health });
+            placeUnit(0, Math.floor(GRID_SIZE / 2) - 2, { ...UNIT_TYPES.TANK, playerId: PLAYER1.id, currentHealth: UNIT_TYPES.TANK.health });
+
+
+            // Place starting units for Player 2 (Blue)
+            placeUnit(GRID_SIZE - 2, Math.floor(GRID_SIZE / 2) -1, { ...UNIT_TYPES.GRUNT, playerId: PLAYER2.id, currentHealth: UNIT_TYPES.GRUNT.health });
+            placeUnit(GRID_SIZE - 2, Math.floor(GRID_SIZE / 2) +2, { ...UNIT_TYPES.SCOUT, playerId: PLAYER2.id, currentHealth: UNIT_TYPES.SCOUT.health });
+            placeUnit(GRID_SIZE - 1, Math.floor(GRID_SIZE / 2) +1, { ...UNIT_TYPES.TANK, playerId: PLAYER2.id, currentHealth: UNIT_TYPES.TANK.health });
+        }
+
+        /**
+         * Places a unit on the board array.
+         * @param {number} r - Row index.
+         * @param {number} c - Column index.
+         * @param {object} unit - The unit object to place.
+         */
+        function placeUnit(r, c, unit) {
+            if (r >= 0 && r < GRID_SIZE && c >= 0 && c < GRID_SIZE) {
+                board[r][c] = { ...unit, r, c }; // Store r, c in unit for convenience
+            }
+        }
+
+        /**
+         * Renders the game board in the HTML.
+         */
+        function renderBoard() {
+            gameBoardElement.innerHTML = ''; // Clear previous board
+            if (!gameActive && !gameOverModal.classList.contains('active')) {
+                 // Don't re-render if game over modal is about to show or is shown
+            }
+
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('grid-cell');
+                    cell.dataset.r = r;
+                    cell.dataset.c = c;
+
+                    const unit = board[r][c];
+                    const tooltip = document.createElement('div');
+                    tooltip.classList.add('unit-tooltip');
+
+                    if (unit) {
+                        cell.textContent = unit.id;
+                        cell.classList.add(unit.playerId === PLAYER1.id ? PLAYER1.unitClass : PLAYER2.unitClass);
+                        if (unit.isBase) {
+                            cell.classList.add(unit.playerId === PLAYER1.id ? PLAYER1.baseClass : PLAYER2.baseClass);
+                        }
+                        tooltip.textContent = `${unit.id} (H:${unit.currentHealth}/${unit.health})`;
+                        if (unit.playerId === currentPlayer.id && gameActive) {
+                           cell.style.fontWeight = 'bold';
+                           cell.style.textShadow = '0 0 5px currentColor';
+                        }
+                    } else {
+                        tooltip.textContent = `Empty (${r},${c})`;
+                    }
+                    cell.appendChild(tooltip);
+                    cell.addEventListener('click', () => handleCellClick(r, c));
+                    gameBoardElement.appendChild(cell);
+                }
+            }
+            // Highlight selected unit and its options
+            if (selectedUnit && gameActive) {
+                const selectedCell = gameBoardElement.querySelector(`[data-r="${selectedUnit.r}"][data-c="${selectedUnit.c}"]`);
+                if (selectedCell) selectedCell.classList.add('selected');
+                highlightPossibleMovesAndAttacks(selectedUnit.r, selectedUnit.c, board[selectedUnit.r][selectedUnit.c]);
+            }
+        }
+
+
+        /**
+         * Handles a click on a grid cell.
+         * @param {number} r - Row index of the clicked cell.
+         * @param {number} c - Column index of the clicked cell.
+         */
+        function handleCellClick(r, c) {
+            if (!gameActive) return;
+
+            const clickedUnit = board[r][c];
+
+            if (selectedUnit) {
+                const unitData = board[selectedUnit.r][selectedUnit.c];
+                if (!unitData) { // Should not happen if selectedUnit is valid
+                    clearSelection();
+                    renderBoard();
+                    return;
+                }
+
+                // Try to move or attack
+                const possibleMoves = getPossibleMoves(selectedUnit.r, selectedUnit.c, unitData);
+                const possibleAttacks = getPossibleAttacks(selectedUnit.r, selectedUnit.c, unitData);
+
+                const isMoveTarget = possibleMoves.some(move => move.r === r && move.c === c);
+                const isAttackTarget = possibleAttacks.some(attack => attack.r === r && attack.c === c);
+
+                if (isMoveTarget && !unitMovedThisTurn && !unitAttackedThisTurn) {
+                    moveUnit(selectedUnit.r, selectedUnit.c, r, c);
+                    unitMovedThisTurn = true;
+                    setMessage(`${currentPlayer.name} moved ${unitData.id}. Select again to attack or end turn.`);
+                    clearSelection(); // Clear selection after move, force re-select for attack
+                    // Keep selectedUnit if you want to allow attack after move without re-click
+                    // selectedUnit = { r, c, unit: board[r][c] }; // Update selected unit's position
+                } else if (isAttackTarget && !unitAttackedThisTurn) {
+                    attackUnit(selectedUnit.r, selectedUnit.c, r, c);
+                    unitAttackedThisTurn = true;
+                    setMessage(`${currentPlayer.name}'s ${unitData.id} attacked!`);
+                    // Attack ends action for this unit
+                    clearSelection();
+                } else if (clickedUnit && clickedUnit.playerId === currentPlayer.id && !clickedUnit.isBase) {
+                    // Clicked on another friendly unit (not base) - select it
+                    selectUnit(r, c);
+                } else {
+                    // Clicked on empty invalid cell or enemy unit not in attack range
+                    clearSelection();
+                }
+            } else { // No unit selected
+                if (clickedUnit && clickedUnit.playerId === currentPlayer.id && !clickedUnit.isBase) {
+                    selectUnit(r, c);
+                } else if (clickedUnit) {
+                    setMessage(`That's not your unit! It's ${clickedUnit.playerId === PLAYER1.id ? PLAYER1.name : PLAYER2.name}'s ${clickedUnit.id}.`);
+                } else {
+                     setMessage("Empty cell. Select one of your units.");
+                }
+            }
+            renderBoard(); // Re-render to show changes (selection, highlights)
+        }
+
+        /**
+         * Selects a unit.
+         * @param {number} r - Row index.
+         * @param {number} c - Column index.
+         */
+        function selectUnit(r, c) {
+            const unit = board[r][c];
+            if (unit && unit.playerId === currentPlayer.id && !unit.isBase) {
+                selectedUnit = { r, c, unit };
+                unitMovedThisTurn = false; // Reset action state for the newly selected unit
+                unitAttackedThisTurn = false;
+                setMessage(`${currentPlayer.name}, selected ${unit.id}. Move or attack.`);
+            } else {
+                selectedUnit = null;
+            }
+        }
+
+        /**
+         * Clears the current unit selection.
+         */
+        function clearSelection() {
+            selectedUnit = null;
+            // No need to reset unitMovedThisTurn/unitAttackedThisTurn here,
+            // they are per-unit-activation, not global turn state.
+            // They are reset when a new unit is selected or turn ends.
+        }
+
+        /**
+         * Moves a unit from (sr, sc) to (tr, tc).
+         * @param {number} sr - Source row.
+         * @param {number} sc - Source column.
+         * @param {number} tr - Target row.
+         * @param {number} tc - Target column.
+         */
+        function moveUnit(sr, sc, tr, tc) {
+            if (!board[sr][sc]) return; // No unit at source
+            const unitToMove = board[sr][sc];
+
+            // Animate move (simple for now)
+            const sourceCell = gameBoardElement.querySelector(`[data-r="${sr}"][data-c="${sc}"]`);
+            const targetCell = gameBoardElement.querySelector(`[data-r="${tr}"][data-c="${tc}"]`);
+
+            board[tr][tc] = unitToMove;
+            board[sr][sc] = null;
+            unitToMove.r = tr; // Update unit's internal position
+            unitToMove.c = tc;
+
+            // Update selected unit's position if it was the one moved
+            if (selectedUnit && selectedUnit.r === sr && selectedUnit.c === sc) {
+                selectedUnit.r = tr;
+                selectedUnit.c = tc;
+            }
+        }
+
+        /**
+         * A unit at (ar, ac) attacks a unit at (dr, dc).
+         * @param {number} ar - Attacker row.
+         * @param {number} ac - Attacker column.
+         * @param {number} dr - Defender row.
+         * @param {number} dc - Defender column.
+         */
+        function attackUnit(ar, ac, dr, dc) {
+            const attacker = board[ar][ac];
+            const defender = board[dr][dc];
+
+            if (!attacker || !defender || attacker.playerId === defender.playerId) return; // Cannot attack self or friendly
+
+            const damage = attacker.attack;
+            defender.currentHealth -= damage;
+
+            setMessage(`${attacker.id} (P${attacker.playerId}) attacks ${defender.id} (P${defender.playerId}) for ${damage} damage! ${defender.id} has ${defender.currentHealth} HP left.`);
+
+            const defenderCell = gameBoardElement.querySelector(`[data-r="${dr}"][data-c="${dc}"]`);
+
+            if (defender.currentHealth <= 0) {
+                setMessage(`${defender.id} (P${defender.playerId}) destroyed!`);
+                if (defenderCell) {
+                    defenderCell.classList.add('unit-death'); // Add death animation class
+                    setTimeout(() => { // Remove after animation
+                        board[dr][dc] = null;
+                        checkWinCondition(); // Check win after unit dies
+                        if (gameActive) renderBoard(); // Re-render if game still active
+                    }, 400); // Match animation duration
+                } else { // Fallback if cell not found (should not happen)
+                    board[dr][dc] = null;
+                    checkWinCondition();
+                    if (gameActive) renderBoard();
+                }
+            } else {
+                 if (defenderCell) { // Visual feedback for damage
+                    defenderCell.style.animation = 'hit 0.3s ease-out';
+                    setTimeout(() => defenderCell.style.animation = '', 300);
+                 }
+                checkWinCondition(); // Check even if not destroyed (e.g. base damaged)
+            }
+        }
+
+
+        /**
+         * Gets all possible move locations for a unit.
+         * @param {number} r - Unit's current row.
+         * @param {number} c - Unit's current column.
+         * @param {object} unit - The unit object.
+         * @returns {Array<{r: number, c: number}>} - Array of possible move coordinates.
+         */
+        function getPossibleMoves(r, c, unit) {
+            if (unitMovedThisTurn || unit.isBase) return []; // Bases and already moved units cannot move
+
+            const moves = [];
+            const maxDist = unit.move;
+
+            // Using Breadth-First Search (BFS) for pathfinding on grid
+            const queue = [{r: r, c: c, dist: 0}];
+            const visited = new Set([`${r},${c}`]); // Keep track of visited cells to avoid cycles and re-processing
+
+            while(queue.length > 0) {
+                const curr = queue.shift();
+
+                // Explore neighbors (up, down, left, right)
+                const dr = [-1, 1, 0, 0];
+                const dc = [0, 0, -1, 1];
+
+                for (let i = 0; i < 4; i++) {
+                    const nr = curr.r + dr[i];
+                    const nc = curr.c + dc[i];
+                    const newDist = curr.dist + 1;
+
+                    if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE && newDist <= maxDist) {
+                        const cellKey = `${nr},${nc}`;
+                        if (!visited.has(cellKey)) {
+                            visited.add(cellKey);
+                            if (!board[nr][nc]) { // Can only move to empty cells
+                                moves.push({ r: nr, c: nc });
+                                queue.push({r: nr, c: nc, dist: newDist});
+                            }
+                        }
+                    }
+                }
+            }
+            return moves;
+        }
+
+        /**
+         * Gets all possible attack targets for a unit.
+         * @param {number} r - Unit's current row.
+         * @param {number} c - Unit's current column.
+         * @param {object} unit - The unit object.
+         * @returns {Array<{r: number, c: number}>} - Array of attackable coordinates.
+         */
+        function getPossibleAttacks(r, c, unit) {
+            if (unitAttackedThisTurn || unit.isBase || unit.attack === 0) return []; // Bases, already attacked units, or 0 attack units cannot attack
+
+            const attacks = [];
+            const attackRange = unit.range; // Typically 1 for direct adjacency
+
+            // Check all cells within Manhattan distance for attack range
+            for (let dr = -attackRange; dr <= attackRange; dr++) {
+                for (let dc = -attackRange; dc <= attackRange; dc++) {
+                    if (Math.abs(dr) + Math.abs(dc) > attackRange || (dr === 0 && dc === 0)) continue; // Skip self and outside range
+
+                    const nr = r + dr;
+                    const nc = c + dc;
+
+                    if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
+                        const targetUnit = board[nr][nc];
+                        if (targetUnit && targetUnit.playerId !== unit.playerId) { // Can attack enemy units
+                            attacks.push({ r: nr, c: nc });
+                        }
+                    }
+                }
+            }
+            return attacks;
+        }
+
+        /**
+         * Highlights possible moves and attacks on the board.
+         * @param {number} r - Unit's current row.
+         * @param {number} c - Unit's current column.
+         * @param {object} unit - The unit object.
+         */
+        function highlightPossibleMovesAndAttacks(r, c, unit) {
+            if (!unit) return;
+
+            // Clear previous highlights
+            document.querySelectorAll('.grid-cell.possible-move, .grid-cell.possible-attack, .grid-cell.highlight-attackable').forEach(cell => {
+                cell.classList.remove('possible-move', 'possible-attack', 'highlight-attackable');
+            });
+
+            if (!unitMovedThisTurn && !unit.isBase) {
+                const moves = getPossibleMoves(r, c, unit);
+                moves.forEach(move => {
+                    const cell = gameBoardElement.querySelector(`[data-r="${move.r}"][data-c="${move.c}"]`);
+                    if (cell) cell.classList.add('possible-move');
+                });
+            }
+
+            if (!unitAttackedThisTurn && !unit.isBase && unit.attack > 0) {
+                const attacks = getPossibleAttacks(r, c, unit);
+                attacks.forEach(attackPos => {
+                    const cell = gameBoardElement.querySelector(`[data-r="${attackPos.r}"][data-c="${attackPos.c}"]`);
+                    if (cell) {
+                        cell.classList.add('possible-attack'); // Highlights the cell itself for clicking
+                        // If you want to highlight the unit in the cell differently:
+                        // cell.classList.add('highlight-attackable');
+                    }
+                });
+            }
+        }
+
+        /**
+         * Switches to the next player's turn.
+         */
+        function endTurn() {
+            if (!gameActive) return;
+
+            clearSelection();
+            unitMovedThisTurn = false; // Reset for the next unit of the next player
+            unitAttackedThisTurn = false;
+
+            currentPlayer = (currentPlayer.id === PLAYER1.id) ? PLAYER2 : PLAYER1;
+            turnIndicatorElement.textContent = `${currentPlayer.name}'s Turn (${currentPlayer.id === PLAYER1.id ? 'Red' : 'Blue'})`;
+            turnIndicatorElement.className = `turn-indicator mb-2 ${currentPlayer.turnClass}`; // Update class for color
+            setMessage(`${currentPlayer.name}, it's your turn! Select a unit.`);
+            renderBoard(); // Re-render to update unit styles (e.g. bold for current player)
+        }
+
+        /**
+         * Sets a message in the message box.
+         * @param {string} msg - The message to display.
+         */
+        function setMessage(msg) {
+            messageBoxElement.textContent = msg;
+        }
+
+        /**
+         * Checks if a win condition has been met.
+         */
+        function checkWinCondition() {
+            let player1BaseFound = false;
+            let player2BaseFound = false;
+
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    const unit = board[r][c];
+                    if (unit && unit.isBase) {
+                        if (unit.playerId === PLAYER1.id && unit.currentHealth > 0) player1BaseFound = true;
+                        if (unit.playerId === PLAYER2.id && unit.currentHealth > 0) player2BaseFound = true;
+                    }
+                }
+            }
+
+            if (!player1BaseFound && gameActive) {
+                gameOver(PLAYER2);
+            } else if (!player2BaseFound && gameActive) {
+                gameOver(PLAYER1);
+            }
+        }
+
+        /**
+         * Handles game over.
+         * @param {object} winner - The winning player object.
+         */
+        function gameOver(winner) {
+            gameActive = false;
+            clearSelection();
+            setMessage(`${winner.name} wins the game!`);
+            turnIndicatorElement.textContent = "Game Over!";
+            turnIndicatorElement.className = `turn-indicator mb-2`; // Reset class
+
+            gameOverTitle.textContent = "Game Over!";
+            gameOverMessage.textContent = `${winner.name} (${winner.id === PLAYER1.id ? 'Red' : 'Blue'}) is victorious!`;
+            gameOverModal.classList.add('active');
+            renderBoard(); // Final render to clear highlights
+        }
+
+        /**
+         * Resets the game to its initial state.
+         */
+        function resetGame() {
+            gameActive = true;
+            currentPlayer = PLAYER1;
+            clearSelection();
+            unitMovedThisTurn = false;
+            unitAttackedThisTurn = false;
+            initializeBoard();
+            renderBoard();
+            turnIndicatorElement.textContent = `${PLAYER1.name}'s Turn (Red)`;
+            turnIndicatorElement.className = `turn-indicator mb-2 ${PLAYER1.turnClass}`;
+            setMessage(`Game reset! ${PLAYER1.name}, select a unit.`);
+            gameOverModal.classList.remove('active');
+        }
+
+
+        // --- Event Listeners ---
+        endTurnButton.addEventListener('click', () => {
+            if (gameActive) {
+                endTurn();
+            }
+        });
+        resetButton.addEventListener('click', resetGame);
+        playAgainButton.addEventListener('click', resetGame);
+
+        // --- Initial Game Setup ---
+        // Add a keydown listener for 'Enter' to end turn, or 'Escape' to clear selection
+        window.addEventListener('keydown', (e) => {
+            if (!gameActive) return;
+
+            if (e.key === 'Enter') {
+                endTurn();
+            } else if (e.key === 'Escape') {
+                if (selectedUnit) {
+                    clearSelection();
+                    setMessage("Selection cleared. Select a unit or end turn.");
+                    renderBoard();
+                }
+            }
+        });
+
+        // Style for hit animation
+        const styleSheet = document.createElement("style");
+        styleSheet.type = "text/css";
+        styleSheet.innerText = `
+            @keyframes hit {
+                0% { transform: scale(1); filter: brightness(1.2) saturate(1.5); }
+                50% { transform: scale(1.05); filter: brightness(1.5) saturate(2); }
+                100% { transform: scale(1); filter: brightness(1) saturate(1); }
+            }
+        `;
+        document.head.appendChild(styleSheet);
+
+
+        // Start the game
+        initializeBoard();
+        renderBoard();
+    </script>
+</body>
+</html>
